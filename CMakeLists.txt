@@ -39,6 +39,10 @@ set(DEPLIBS ${kodiplatform_LIBRARIES}
             ${p8-platform_LIBRARIES}
             ${TINYXML_LIBRARIES})
 
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  list(APPEND DEPLIBS winmm)
+endif()
+
 # check if the linker supports version script or symbols list
 if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   include(CheckCXXCompilerFlag)
