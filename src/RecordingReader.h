@@ -5,6 +5,9 @@
 
 #include "libXBMC_addon.h"
 
+namespace DVBViewer
+{
+
 class RecordingReader
 {
 public:
@@ -35,4 +38,5 @@ private:
   uint64_t m_len;
 };
 
+}
 #endif

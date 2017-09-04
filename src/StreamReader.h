@@ -5,6 +5,9 @@
 
 #include "IStreamReader.h"
 
+namespace DVBViewer
+{
+
 class StreamReader
   : public IStreamReader
 {
@@ -26,4 +29,5 @@ private:
   time_t m_start;
 };
 
+}
 #endif

@@ -5,6 +5,9 @@
 
 #include "libXBMC_addon.h"
 
+namespace DVBViewer
+{
+
 class IStreamReader
 {
 public:
@@ -20,4 +23,5 @@ public:
   virtual bool CanTimeshift() = 0;
 };
 
+}
 #endif

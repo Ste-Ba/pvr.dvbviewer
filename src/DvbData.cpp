@@ -10,6 +10,7 @@
 #include <sstream>
 #include <algorithm>
 
+using namespace DVBViewer;
 using namespace ADDON;
 using namespace P8PLATFORM;
 
@@ -30,9 +31,11 @@ static bool XMLUtils_GetString(const TiXmlNode* pRootNode, const char* strTag,
   return true;
 }
 
-Dvb::Dvb()
-  : m_state(PVR_CONNECTION_STATE_UNKNOWN), m_backendVersion(0), m_currentChannel(0),
-  m_nextTimerId(1)
+Client::Client()
+  : m_state(PVR_CONNECTION_STATE_UNKNOWN)
+  , m_backendVersion(0)
+  , m_currentChannel(0)
+  , m_nextTimerId(1)
 {
   // simply add user@pass in front of the URL if username/password is set
   std::string auth("");
@@ -47,7 +50,7 @@ Dvb::Dvb()
   CreateThread();
 }
 
-Dvb::~Dvb()
+Client::~Client()
 {
   StopThread();
 
@@ -55,18 +58,18 @@ Dvb::~Dvb()
     delete channel;
 }
 
-bool Dvb::IsConnected()
+bool Client::IsConnected()
 {
   return m_state == PVR_CONNECTION_STATE_CONNECTED;
 }
 
-std::string Dvb::GetBackendName()
+std::string Client::GetBackendName()
 {
   // RS api doesn't provide a reliable way to extract the server name
   return "DVBViewer";
 }
 
-std::string Dvb::GetBackendVersion()
+std::string Client::GetBackendVersion()
 {
   std::string version = StringUtils::Format("%u.%u.%u.%u",
       m_backendVersion >> 24 & 0xFF,
@@ -76,7 +79,7 @@ std::string Dvb::GetBackendVersion()
   return version;
 }
 
-bool Dvb::GetDriveSpace(long long *total, long long *used)
+bool Client::GetDriveSpace(long long *total, long long *used)
 {
   CLockObject lock(m_mutex);
   if (!UpdateBackendStatus())
@@ -86,13 +89,13 @@ bool Dvb::GetDriveSpace(long long *total, long long *used)
   return true;
 }
 
-unsigned int Dvb::GetCurrentClientChannel(void)
+unsigned int Client::GetCurrentClientChannel(void)
 {
   CLockObject lock(m_mutex);
   return m_currentChannel;
 }
 
-bool Dvb::GetChannels(ADDON_HANDLE handle, bool radio)
+bool Client::GetChannels(ADDON_HANDLE handle, bool radio)
 {
   for (auto channel : m_channels)
   {
@@ -116,10 +119,10 @@ bool Dvb::GetChannels(ADDON_HANDLE handle, bool radio)
   return true;
 }
 
-bool Dvb::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &channelinfo,
+bool Client::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &channelinfo,
     time_t start, time_t end)
 {
-  DvbChannel *channel = m_channels[channelinfo.iUniqueId - 1];
+  Channel *channel = m_channels[channelinfo.iUniqueId - 1];
 
   const std::string &url = BuildURL("api/epg.html?lvl=2&channel=%" PRIu64
       "&start=%f&end=%f", channel->epgId, start/86400.0 + DELPHI_DATE,
@@ -144,7 +147,7 @@ bool Dvb::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &channelinfo,
   for (TiXmlElement *xEntry = doc.RootElement()->FirstChildElement("programme");
       xEntry; xEntry = xEntry->NextSiblingElement("programme"))
   {
-    DvbEPGEntry entry;
+    EPGEntry entry;
     entry.channel = channel;
     entry.start   = ParseDateTime(xEntry->Attribute("start"));
     entry.end     = ParseDateTime(xEntry->Attribute("stop"));
@@ -209,13 +212,13 @@ bool Dvb::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &channelinfo,
   return true;
 }
 
-unsigned int Dvb::GetChannelsAmount()
+unsigned int Client::GetChannelsAmount()
 {
   return m_channelAmount;
 }
 
 
-bool Dvb::GetChannelGroups(ADDON_HANDLE handle, bool radio)
+bool Client::GetChannelGroups(ADDON_HANDLE handle, bool radio)
 {
   for (auto &group : m_groups)
   {
@@ -234,7 +237,7 @@ bool Dvb::GetChannelGroups(ADDON_HANDLE handle, bool radio)
   return true;
 }
 
-bool Dvb::GetChannelGroupMembers(ADDON_HANDLE handle,
+bool Client::GetChannelGroupMembers(ADDON_HANDLE handle,
     const PVR_CHANNEL_GROUP &pvrGroup)
 {
   unsigned int channelNumberInGroup = 1;
@@ -262,13 +265,13 @@ bool Dvb::GetChannelGroupMembers(ADDON_HANDLE handle,
   return true;
 }
 
-unsigned int Dvb::GetChannelGroupsAmount()
+unsigned int Client::GetChannelGroupsAmount()
 {
   return m_groupAmount;
 }
 
 
-bool Dvb::GetTimers(ADDON_HANDLE handle)
+bool Client::GetTimers(ADDON_HANDLE handle)
 {
   CLockObject lock(m_mutex);
   for (auto &timer : m_timers)
@@ -293,7 +296,7 @@ bool Dvb::GetTimers(ADDON_HANDLE handle)
   return true;
 }
 
-bool Dvb::AddTimer(const PVR_TIMER &timer, bool update)
+bool Client::AddTimer(const PVR_TIMER &timer, bool update)
 {
   XBMC->Log(LOG_DEBUG, "%s: channel=%u, title='%s'",
       __FUNCTION__, timer.iClientChannelUid, timer.strTitle);
@@ -326,7 +329,7 @@ bool Dvb::AddTimer(const PVR_TIMER &timer, bool update)
         URLEncode(timer.strTitle).c_str()));
   else
   {
-    auto t = GetTimer([&] (const DvbTimer &t)
+    auto t = GetTimer([&] (const Timer &t)
         {
           return (t.id == timer.iClientIndex);
         });
@@ -346,10 +349,10 @@ bool Dvb::AddTimer(const PVR_TIMER &timer, bool update)
   return true;
 }
 
-bool Dvb::DeleteTimer(const PVR_TIMER &timer)
+bool Client::DeleteTimer(const PVR_TIMER &timer)
 {
   CLockObject lock(m_mutex);
-  auto t = GetTimer([&] (const DvbTimer &t)
+  auto t = GetTimer([&] (const Timer &t)
       {
         return (t.id == timer.iClientIndex);
       });
@@ -363,14 +366,14 @@ bool Dvb::DeleteTimer(const PVR_TIMER &timer)
   return true;
 }
 
-unsigned int Dvb::GetTimersAmount()
+unsigned int Client::GetTimersAmount()
 {
   CLockObject lock(m_mutex);
   return m_timers.size();
 }
 
 
-bool Dvb::GetRecordings(ADDON_HANDLE handle)
+bool Client::GetRecordings(ADDON_HANDLE handle)
 {
   CLockObject lock(m_mutex);
   httpResponse &&res = GetHttpXML(BuildURL("api/recordings.html?utf8=1"
@@ -395,7 +398,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
 
   // there's no need to merge new recordings in older ones as XBMC does this
   // already for us (using strRecordingId). so just parse all recordings again
-  std::vector<DvbRecording> recordings;
+  std::vector<Recording> recordings;
   m_recordingAmount = 0;
 
   // group name and its size/amount of recordings
@@ -409,7 +412,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
     if (!xRecording)
       continue;
 
-    DvbRecording recording;
+    Recording recording;
     recording.id = xRecording->Attribute("id");
     xRecording->QueryUnsignedAttribute("content", &recording.genre);
     XMLUtils_GetString(xRecording, "title",   recording.title);
@@ -429,7 +432,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
 
     /* fetch and search channel */
     XMLUtils_GetString(xRecording, "channel", recording.channelName);
-    recording.channel = GetChannel([&] (const DvbChannel *channel)
+    recording.channel = GetChannel([&] (const Channel *channel)
         {
           return (channel->backendName == recording.channelName);
         });
@@ -451,7 +454,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
     std::string group("Unknown");
     switch(g_groupRecordings)
     {
-      case DvbRecording::Grouping::BY_DIRECTORY:
+      case GroupRecordings::BY_DIRECTORY:
         if (!XMLUtils_GetString(xRecording, "file", group))
           break;
         StringUtils::ToLower(group);
@@ -465,20 +468,20 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
           break;
         }
         break;
-      case DvbRecording::Grouping::BY_DATE:
+      case GroupRecordings::BY_DATE:
         group = StringUtils::Format("%s/%s", startTime.substr(0, 4).c_str(),
             startTime.substr(4, 2).c_str());
         break;
-      case DvbRecording::Grouping::BY_FIRST_LETTER:
+      case GroupRecordings::BY_FIRST_LETTER:
         group = toupper(recording.title[0]);
         break;
-      case DvbRecording::Grouping::BY_TV_CHANNEL:
+      case GroupRecordings::BY_TV_CHANNEL:
         group = recording.channelName;
         break;
-      case DvbRecording::Grouping::BY_SERIES:
+      case GroupRecordings::BY_SERIES:
         XMLUtils_GetString(xRecording, "series", group);
         break;
-      case DvbRecording::Grouping::BY_TITLE:
+      case GroupRecordings::BY_TITLE:
         group = recording.title;
         break;
       default:
@@ -516,7 +519,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
     }
 
     // no grouping for single entry groups if by_title
-    if (g_groupRecordings != DvbRecording::Grouping::BY_TITLE
+    if (g_groupRecordings != GroupRecordings::BY_TITLE
         || recording.group->second > 1)
       PVR_STRCPY(recinfo.strDirectory, recording.group->first.c_str());
 
@@ -532,7 +535,7 @@ bool Dvb::GetRecordings(ADDON_HANDLE handle)
   return true;
 }
 
-bool Dvb::DeleteRecording(const PVR_RECORDING &recinfo)
+bool Client::DeleteRecording(const PVR_RECORDING &recinfo)
 {
   // RS api doesn't return a result
   // TODO: check for http 200 / http 423
@@ -544,18 +547,18 @@ bool Dvb::DeleteRecording(const PVR_RECORDING &recinfo)
   return true;
 }
 
-unsigned int Dvb::GetRecordingsAmount()
+unsigned int Client::GetRecordingsAmount()
 {
   CLockObject lock(m_mutex);
   return m_recordingAmount;
 }
 
-RecordingReader *Dvb::OpenRecordedStream(const PVR_RECORDING &recinfo)
+RecordingReader *Client::OpenRecordedStream(const PVR_RECORDING &recinfo)
 {
   CLockObject lock(m_mutex);
   time_t now = time(NULL), end = 0;
   std::string channelName = recinfo.strChannelName;
-  auto timer = GetTimer([&] (const DvbTimer &timer)
+  auto timer = GetTimer([&] (const Timer &timer)
       {
         return (timer.start <= now && now <= timer.end
             && timer.state != PVR_TIMER_STATE_CANCELLED
@@ -569,7 +572,7 @@ RecordingReader *Dvb::OpenRecordedStream(const PVR_RECORDING &recinfo)
 }
 
 
-bool Dvb::OpenLiveStream(const PVR_CHANNEL &channelinfo)
+bool Client::OpenLiveStream(const PVR_CHANNEL &channelinfo)
 {
   XBMC->Log(LOG_DEBUG, "%s: channel=%u", __FUNCTION__, channelinfo.iUniqueId);
   CLockObject lock(m_mutex);
@@ -583,15 +586,15 @@ bool Dvb::OpenLiveStream(const PVR_CHANNEL &channelinfo)
   return true;
 }
 
-void Dvb::CloseLiveStream(void)
+void Client::CloseLiveStream(void)
 {
   CLockObject lock(m_mutex);
   m_currentChannel = 0;
 }
 
-const std::string Dvb::GetLiveStreamURL(const PVR_CHANNEL &channelinfo)
+const std::string Client::GetLiveStreamURL(const PVR_CHANNEL &channelinfo)
 {
-  DvbChannel *channel = m_channels[channelinfo.iUniqueId - 1];
+  Channel *channel = m_channels[channelinfo.iUniqueId - 1];
   uint64_t backendId = channel->backendIds.front();
   switch(g_transcoding)
   {
@@ -611,7 +614,7 @@ const std::string Dvb::GetLiveStreamURL(const PVR_CHANNEL &channelinfo)
   return BuildURL("upnp/channelstream/%" PRIu64 ".ts", backendId);
 }
 
-void *Dvb::Process()
+void *Client::Process()
 {
   XBMC->Log(LOG_DEBUG, "%s: Running...", __FUNCTION__);
   int update = 0;
@@ -689,13 +692,13 @@ void *Dvb::Process()
 }
 
 
-Dvb::httpResponse Dvb::GetHttpXML(const std::string& url)
+Client::httpResponse Client::GetHttpXML(const std::string& url)
 {
   // TODO Kodi CURL api doesn't expose the http code. need to replace it
   // afterwards handle connection failures here
   // (PVR_CONNECTION_STATE_SERVER_UNREACHABLE)
   httpResponse res = { true, "" };
-  void *fileHandle = XBMC->OpenFile(url.c_str(), READ_NO_CACHE);
+  void *fileHandle = XBMC->OpenFile(url.c_str(), XFILE::READ_NO_CACHE);
   if (fileHandle)
   {
     res.error = false;
@@ -709,7 +712,7 @@ Dvb::httpResponse Dvb::GetHttpXML(const std::string& url)
 }
 
 /* Copied from xbmc/URL.cpp */
-std::string Dvb::URLEncode(const std::string& data)
+std::string Client::URLEncode(const std::string& data)
 {
   std::string result;
 
@@ -732,7 +735,7 @@ std::string Dvb::URLEncode(const std::string& data)
   return result;
 }
 
-bool Dvb::LoadChannels()
+bool Client::LoadChannels()
 {
   const httpResponse &res = GetHttpXML(BuildURL("api/getchannelsxml.html"
       "?fav=1&subchannels=1&logo=1"));
@@ -793,18 +796,18 @@ bool Dvb::LoadChannels()
     for (TiXmlElement *xGroup = xRoot->FirstChildElement("group");
         xGroup; xGroup = xGroup->NextSiblingElement("group"))
     {
-      m_groups.push_back(DvbGroup());
-      DvbGroup *group = &m_groups.back();
-      group->name     = group->backendName = xGroup->Attribute("name");
-      group->hidden   = g_useFavourites;
-      group->radio    = true;
+      m_groups.push_back(ChannelGroup());
+      ChannelGroup *group = &m_groups.back();
+      group->name   = group->backendName = xGroup->Attribute("name");
+      group->hidden = g_useFavourites;
+      group->radio  = true;
       if (!group->hidden)
         ++m_groupAmount;
 
       for (TiXmlElement *xChannel = xGroup->FirstChildElement("channel");
           xChannel; xChannel = xChannel->NextSiblingElement("channel"))
       {
-        DvbChannel *channel = new DvbChannel();
+        Channel *channel = new Channel();
         unsigned int flags = 0;
         xChannel->QueryUnsignedAttribute("flags", &flags);
         channel->radio      = !(flags & VIDEO_FLAG);
@@ -854,11 +857,11 @@ bool Dvb::LoadChannels()
     for (TiXmlElement *xGroup = xRoot->FirstChildElement("group");
         xGroup; xGroup = xGroup->NextSiblingElement("group"))
     {
-      m_groups.push_back(DvbGroup());
-      DvbGroup *group = &m_groups.back();
-      group->name     = group->backendName = xGroup->Attribute("name");
-      group->hidden   = false;
-      group->radio    = true;
+      m_groups.push_back(ChannelGroup());
+      ChannelGroup *group = &m_groups.back();
+      group->name   = group->backendName = xGroup->Attribute("name");
+      group->hidden = false;
+      group->radio  = true;
       ++m_groupAmount;
 
       for (TiXmlElement *xChannel = xGroup->FirstChildElement("channel");
@@ -866,7 +869,7 @@ bool Dvb::LoadChannels()
       {
         uint64_t backendId = 0;
         xChannel->QueryValueAttribute<uint64_t>("ID", &backendId);
-        DvbChannel *channel = GetChannel([&] (const DvbChannel *channel)
+        Channel *channel = GetChannel([&] (const Channel *channel)
             {
               return (std::find(channel->backendIds.begin(),
                     channel->backendIds.end(), backendId)
@@ -938,7 +941,7 @@ bool Dvb::LoadChannels()
     for (TiXmlElement *xSection = doc.RootElement()->FirstChildElement("section");
         xSection; xSection = xSection->NextSiblingElement("section"))
     {
-      DvbGroup *group = NULL;
+      ChannelGroup *group = NULL;
       for (TiXmlElement *xEntry = xSection->FirstChildElement("entry");
           xEntry; xEntry = xEntry->NextSiblingElement("entry"))
       {
@@ -947,7 +950,7 @@ bool Dvb::LoadChannels()
         if (!group && std::string(xEntry->Attribute("name")) == "Header"
             && xEntry->NextSiblingElement("entry"))
         {
-          m_groups.push_back(DvbGroup());
+          m_groups.push_back(ChannelGroup());
           group = &m_groups.back();
           group->name   = ConvertToUtf8(xEntry->GetText());
           group->hidden = false;
@@ -970,7 +973,7 @@ bool Dvb::LoadChannels()
           channelName = ConvertToUtf8(channelName);
         }
 
-        DvbChannel *channel = GetChannel([&] (const DvbChannel *channel)
+        Channel *channel = GetChannel([&] (const Channel *channel)
             {
               return (std::find(channel->backendIds.begin(),
                     channel->backendIds.end(), backendId)
@@ -1017,9 +1020,9 @@ bool Dvb::LoadChannels()
   return true;
 }
 
-DvbTimers_t Dvb::LoadTimers()
+TimerList Client::LoadTimers()
 {
-  DvbTimers_t timers;
+  TimerList timers;
 
   // utf8=2 is correct here
   httpResponse &&res = GetHttpXML(BuildURL("api/timerlist.html?utf8=2"));
@@ -1044,7 +1047,7 @@ DvbTimers_t Dvb::LoadTimers()
   for (TiXmlElement *xTimer = doc.RootElement()->FirstChildElement("Timer");
       xTimer; xTimer = xTimer->NextSiblingElement("Timer"))
   {
-    DvbTimer timer;
+    Timer timer;
 
     if (!XMLUtils_GetString(xTimer, "GUID", timer.guid))
       continue;
@@ -1057,7 +1060,7 @@ DvbTimers_t Dvb::LoadTimers()
     if (!backendId)
       continue;
 
-    timer.channel = GetChannel([&] (const DvbChannel *channel)
+    timer.channel = GetChannel([&] (const Channel *channel)
         {
           return (std::find(channel->backendIds.begin(),
                 channel->backendIds.end(), backendId)
@@ -1080,7 +1083,7 @@ DvbTimers_t Dvb::LoadTimers()
     }
 
     timer.priority    = atoi(xTimer->Attribute("Priority"));
-    timer.updateState = DvbTimer::State::NEW;
+    timer.updateState = Timer::State::NEW;
     timer.state       = PVR_TIMER_STATE_SCHEDULED;
     if (xTimer->Attribute("Enabled")[0] == '0')
       timer.state = PVR_TIMER_STATE_CANCELLED;
@@ -1099,12 +1102,12 @@ DvbTimers_t Dvb::LoadTimers()
   return timers;
 }
 
-void Dvb::TimerUpdates()
+void Client::TimerUpdates()
 {
   for (auto &timer : m_timers)
-    timer.updateState = DvbTimer::State::NONE;
+    timer.updateState = Timer::State::NONE;
 
-  DvbTimers_t &&newtimers = LoadTimers();
+  TimerList &&newtimers = LoadTimers();
   unsigned int updated = 0, unchanged = 0;
   for (auto &newtimer : newtimers)
   {
@@ -1115,12 +1118,12 @@ void Dvb::TimerUpdates()
 
       if (timer.updateFrom(newtimer))
       {
-        timer.updateState = newtimer.updateState = DvbTimer::State::UPDATED;
+        timer.updateState = newtimer.updateState = Timer::State::UPDATED;
         ++updated;
       }
       else
       {
-        timer.updateState = newtimer.updateState = DvbTimer::State::FOUND;
+        timer.updateState = newtimer.updateState = Timer::State::FOUND;
         ++unchanged;
       }
       break;
@@ -1130,7 +1133,7 @@ void Dvb::TimerUpdates()
   unsigned int removed = 0;
   for (auto it = m_timers.begin(); it != m_timers.end();)
   {
-    if (it->updateState == DvbTimer::State::NONE)
+    if (it->updateState == Timer::State::NONE)
     {
       XBMC->Log(LOG_DEBUG, "%s: Removed timer '%s': id=%u", __FUNCTION__,
           it->title.c_str(), it->id);
@@ -1144,7 +1147,7 @@ void Dvb::TimerUpdates()
   unsigned int added = 0;
   for (auto &newtimer : newtimers)
   {
-    if (newtimer.updateState == DvbTimer::State::NEW)
+    if (newtimer.updateState == Timer::State::NEW)
     {
       newtimer.id = m_nextTimerId;
       XBMC->Log(LOG_DEBUG, "%s: New timer '%s': id=%u", __FUNCTION__,
@@ -1165,7 +1168,7 @@ void Dvb::TimerUpdates()
   }
 }
 
-DvbChannel *Dvb::GetChannel(std::function<bool (const DvbChannel*)> func)
+Channel *Client::GetChannel(std::function<bool (const Channel*)> func)
 {
   for (auto channel : m_channels)
   {
@@ -1175,7 +1178,7 @@ DvbChannel *Dvb::GetChannel(std::function<bool (const DvbChannel*)> func)
   return nullptr;
 }
 
-DvbTimer *Dvb::GetTimer(std::function<bool (const DvbTimer&)> func)
+Timer *Client::GetTimer(std::function<bool (const Timer&)> func)
 {
   for (auto &timer : m_timers)
   {
@@ -1186,13 +1189,13 @@ DvbTimer *Dvb::GetTimer(std::function<bool (const DvbTimer&)> func)
 }
 
 
-void Dvb::RemoveNullChars(std::string& str)
+void Client::RemoveNullChars(std::string& str)
 {
   /* favourites.xml and timers.xml sometimes have null chars that screw the xml */
   str.erase(std::remove(str.begin(), str.end(), '\0'), str.end());
 }
 
-bool Dvb::CheckBackendVersion()
+bool Client::CheckBackendVersion()
 {
   const httpResponse &res = GetHttpXML(BuildURL("api/version.html"));
   if (res.error)
@@ -1236,7 +1239,7 @@ bool Dvb::CheckBackendVersion()
   return true;
 }
 
-bool Dvb::UpdateBackendStatus(bool updateSettings)
+bool Client::UpdateBackendStatus(bool updateSettings)
 {
   const httpResponse &res = GetHttpXML(BuildURL("api/status2.html"));
   if (res.error)
@@ -1278,7 +1281,7 @@ bool Dvb::UpdateBackendStatus(bool updateSettings)
       m_diskspace.used += (size - free) / 1024;
     }
 
-    if (updateSettings && g_groupRecordings == DvbRecording::Grouping::BY_DIRECTORY)
+    if (updateSettings && g_groupRecordings == GroupRecordings::BY_DIRECTORY)
     {
       std::string recf = xFolder->GetText();
       StringUtils::ToLower(recf);
@@ -1286,7 +1289,7 @@ bool Dvb::UpdateBackendStatus(bool updateSettings)
     }
   }
 
-  if (updateSettings && g_groupRecordings == DvbRecording::Grouping::BY_DIRECTORY)
+  if (updateSettings && g_groupRecordings == GroupRecordings::BY_DIRECTORY)
     std::sort(m_recfolders.begin(), m_recfolders.end(),
         [](const std::string& a, const std::string& b)
         {
@@ -1296,7 +1299,7 @@ bool Dvb::UpdateBackendStatus(bool updateSettings)
   return true;
 }
 
-void Dvb::SetConnectionState(PVR_CONNECTION_STATE state,
+void Client::SetConnectionState(PVR_CONNECTION_STATE state,
     const char *message, ...)
 {
   if (state != m_state)
@@ -1317,7 +1320,7 @@ void Dvb::SetConnectionState(PVR_CONNECTION_STATE state,
   }
 }
 
-time_t Dvb::ParseDateTime(const std::string& date, bool iso8601)
+time_t Client::ParseDateTime(const std::string& date, bool iso8601)
 {
   struct tm timeinfo;
 
@@ -1337,7 +1340,7 @@ time_t Dvb::ParseDateTime(const std::string& date, bool iso8601)
   return mktime(&timeinfo);
 }
 
-std::string Dvb::BuildURL(const char* path, ...)
+std::string Client::BuildURL(const char* path, ...)
 {
   std::string url(m_url);
   va_list argList;
@@ -1347,7 +1350,7 @@ std::string Dvb::BuildURL(const char* path, ...)
   return url;
 }
 
-std::string Dvb::BuildExtURL(const std::string& baseURL, const char* path, ...)
+std::string Client::BuildExtURL(const std::string& baseURL, const char* path, ...)
 {
   std::string url(baseURL);
   // simply add user@pass in front of the URL if username/password is set
@@ -1367,7 +1370,7 @@ std::string Dvb::BuildExtURL(const std::string& baseURL, const char* path, ...)
   return url;
 }
 
-std::string Dvb::ConvertToUtf8(const std::string& src)
+std::string Client::ConvertToUtf8(const std::string& src)
 {
   char *tmp = XBMC->UnknownToUTF8(src.c_str());
   std::string dest(tmp);
@@ -1375,7 +1378,7 @@ std::string Dvb::ConvertToUtf8(const std::string& src)
   return dest;
 }
 
-long Dvb::GetGMTOffset()
+long Client::GetGMTOffset()
 {
 #ifdef TARGET_POSIX
   struct tm t;

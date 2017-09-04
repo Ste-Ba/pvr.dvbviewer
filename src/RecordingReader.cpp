@@ -7,10 +7,14 @@
 #define REOPEN_INTERVAL      30
 #define REOPEN_INTERVAL_FAST 10
 
+using namespace DVBViewer;
 using namespace ADDON;
 
 RecordingReader::RecordingReader(const std::string &streamURL, time_t end)
-  : m_streamURL(streamURL), m_end(end), m_fastReopen(false), m_playback(false)
+  : m_streamURL(streamURL)
+  , m_end(end)
+  , m_fastReopen(false)
+  , m_playback(false)
 {
   m_readHandle = XBMC->OpenFile(m_streamURL.c_str(), 0);
   m_len = XBMC->GetFileLength(m_readHandle);

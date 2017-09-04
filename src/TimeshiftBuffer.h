@@ -4,10 +4,15 @@
 #define PVR_DVBVIEWER_TIMESHIFTBUFFER_H
 
 #include "IStreamReader.h"
+#include "CircularCache.h"
 #include "p8-platform/threads/threads.h"
 
+namespace DVBViewer
+{
+
 class TimeshiftBuffer
-  : public IStreamReader, public P8PLATFORM::CThread
+  : public IStreamReader
+  , public P8PLATFORM::CThread
 {
 public:
   TimeshiftBuffer(IStreamReader *strReader, const std::string &bufferPath);
@@ -24,16 +29,18 @@ public:
 
 private:
   virtual void *Process(void) override;
+  ssize_t ReadDataFromCache(unsigned char *buffer, unsigned int size);
+  ssize_t ReadDataFromFile(unsigned char *buffer, unsigned int size);
 
   std::string m_bufferPath;
   IStreamReader *m_strReader;
   void *m_filebufferReadHandle;
   void *m_filebufferWriteHandle;
   time_t m_start;
-#ifndef TARGET_POSIX
-  P8PLATFORM::CMutex m_mutex;
-  uint64_t m_writePos;
-#endif
+  uint64_t m_readPos;
+  uint64_t m_fileReadPos;
+  CCircularCache m_cache;
 };
 
+}
 #endif

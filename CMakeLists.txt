@@ -22,6 +22,8 @@ set(DVBVIEWER_SOURCES src/client.cpp
                       src/DvbData.cpp
                       src/StreamReader.cpp
                       src/RecordingReader.cpp
+                      src/SystemClock.cpp
+                      src/CircularCache.cpp
                       src/TimeshiftBuffer.cpp)
 
 set(DVBVIEWER_HEADERS src/client.h
@@ -29,6 +31,8 @@ set(DVBVIEWER_HEADERS src/client.h
                       src/IStreamReader.h
                       src/RecordingReader.h
                       src/StreamReader.h
+                      src/SystemClock.h
+                      src/CircularCache.h
                       src/TimeshiftBuffer.h)
 
 set(DEPLIBS ${kodiplatform_LIBRARIES}

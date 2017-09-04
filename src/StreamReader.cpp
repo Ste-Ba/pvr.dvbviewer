@@ -1,12 +1,13 @@
 #include "StreamReader.h"
 #include "client.h"
 
+using namespace DVBViewer;
 using namespace ADDON;
 
 StreamReader::StreamReader(const std::string &streamURL)
   : m_start(time(NULL))
 {
-  m_streamHandle = XBMC->OpenFile(streamURL.c_str(), READ_NO_CACHE);
+  m_streamHandle = XBMC->OpenFile(streamURL.c_str(), XFILE::READ_NO_CACHE);
   XBMC->Log(LOG_DEBUG, "StreamReader: Started; url=%s", streamURL.c_str());
 }
 

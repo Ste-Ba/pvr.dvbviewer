@@ -4,22 +4,29 @@
 #include "p8-platform/util/util.h"
 
 #define STREAM_READ_BUFFER_SIZE   32768
+#define CACHE_BUFFER_SIZE         STREAM_READ_BUFFER_SIZE * 1024 // 32MB
+//#define CACHE_BUFFER_SIZE       STREAM_READ_BUFFER_SIZE * 128 // 4MB
 #define BUFFER_READ_TIMEOUT       10000
-#define BUFFER_READ_WAITTIME      50
 
+static_assert(CACHE_BUFFER_SIZE % STREAM_READ_BUFFER_SIZE == 0,
+    "Cache size has to be multiple of read size");
+
+using namespace DVBViewer;
 using namespace ADDON;
 
 TimeshiftBuffer::TimeshiftBuffer(IStreamReader *strReader,
     const std::string &bufferPath)
-  : m_strReader(strReader), m_bufferPath(bufferPath), m_start(0)
+  : m_strReader(strReader)
+  , m_bufferPath(bufferPath)
+  , m_start(0)
+  , m_readPos(0)
+  , m_fileReadPos(0)
+  , m_cache(CACHE_BUFFER_SIZE)
 {
   m_bufferPath += "/tsbuffer.ts";
   m_filebufferWriteHandle = XBMC->OpenFileForWrite(m_bufferPath.c_str(), true);
-#ifndef TARGET_POSIX
-  m_writePos = 0;
-#endif
   Sleep(100);
-  m_filebufferReadHandle = XBMC->OpenFile(m_bufferPath.c_str(), READ_NO_CACHE);
+  m_filebufferReadHandle = XBMC->OpenFile(m_bufferPath.c_str(), XFILE::READ_NO_CACHE);
 }
 
 TimeshiftBuffer::~TimeshiftBuffer(void)
@@ -49,6 +56,7 @@ bool TimeshiftBuffer::Start()
   if (IsRunning())
     return true;
   XBMC->Log(LOG_INFO, "Timeshift: Started");
+  m_cache.Open();
   m_start = time(NULL);
   CreateThread();
   return true;
@@ -64,12 +72,7 @@ void *TimeshiftBuffer::Process()
   {
     ssize_t read = m_strReader->ReadData(buffer, sizeof(buffer));
     XBMC->WriteFile(m_filebufferWriteHandle, buffer, read);
-
-#ifndef TARGET_POSIX
-    m_mutex.Lock();
-    m_writePos += read;
-    m_mutex.Unlock();
-#endif
+    m_cache.WriteToCache(buffer, read); // guaranteed to succeed
   }
   XBMC->Log(LOG_DEBUG, "Timeshift: Thread stopped");
   return NULL;
@@ -77,51 +80,82 @@ void *TimeshiftBuffer::Process()
 
 int64_t TimeshiftBuffer::Seek(long long position, int whence)
 {
-  return XBMC->SeekFile(m_filebufferReadHandle, position, whence);
+  int64_t nextpos, end = Length();
+  switch (whence)
+  {
+    case SEEK_SET:
+      nextpos = position;
+      break;
+    case SEEK_CUR:
+      nextpos = m_readPos + position;
+      break;
+    case SEEK_END:
+      nextpos = end + position;
+      break;
+    default:
+        return -1;
+  }
+  if (nextpos < 0 || nextpos > end)
+  {
+    XBMC->Log(LOG_ERROR, "Timeshift: Invalid seek to %ld", nextpos);
+    return -1;
+  }
+  m_readPos = nextpos;
+  return nextpos;
 }
 
 int64_t TimeshiftBuffer::Position()
 {
+
   return XBMC->GetFilePosition(m_filebufferReadHandle);
 }
 
 int64_t TimeshiftBuffer::Length()
 {
-  // We can't use GetFileLength here as it's value will be cached
-  // by Kodi until we read or seek above it.
-  // see xbm/xbmc/filesystem/HDFile.cpp CHDFile::GetLength()
-  //return XBMC->GetFileLength(m_filebufferReadHandle);
-
-  int64_t writePos = 0;
-#ifdef TARGET_POSIX
-  /* refresh write position */
-  XBMC->SeekFile(m_filebufferWriteHandle, 0L, SEEK_CUR);
-  writePos = XBMC->GetFilePosition(m_filebufferWriteHandle);
-#else
-  m_mutex.Lock();
-  writePos = m_writePos;
-  m_mutex.Unlock();
-#endif
-  return writePos;
+  return m_cache.CachedDataEndPos();
 }
 
 ssize_t TimeshiftBuffer::ReadData(unsigned char *buffer, unsigned int size)
 {
-  /* make sure we never read above the current write position */
-  int64_t readPos = XBMC->GetFilePosition(m_filebufferReadHandle);
-  unsigned int timeWaited = 0;
-  while (readPos + size > Length())
+  ssize_t read = ReadDataFromCache(buffer, size);
+  if (read == CACHE_RC_ERROR)
+    read = ReadDataFromFile(buffer, size);
+  if (read < 0)
+    return -1;
+  m_readPos += read;
+  return read;
+}
+
+ssize_t TimeshiftBuffer::ReadDataFromCache(unsigned char *buffer,
+    unsigned int size)
+{
+  ssize_t read = m_cache.ReadFromCache(m_readPos, buffer, size);
+
+  /* block if we want to read above the cache end */
+  if (read == CACHE_RC_WOULD_BLOCK)
   {
-    if (timeWaited > BUFFER_READ_TIMEOUT)
+    int64_t avail = m_cache.WaitForData(m_readPos, size, BUFFER_READ_TIMEOUT);
+    if (avail < size)
     {
-      XBMC->Log(LOG_DEBUG, "Timeshift: Read timed out; waited %u", timeWaited);
-      return -1;
+      XBMC->Log(LOG_DEBUG, "Timeshift: Cache timeout; waited %u",
+          BUFFER_READ_TIMEOUT);
+      return CACHE_RC_TIMEOUT;
     }
-    Sleep(BUFFER_READ_WAITTIME);
-    timeWaited += BUFFER_READ_WAITTIME;
+    return ReadDataFromCache(buffer, size);
   }
 
-  return XBMC->ReadFile(m_filebufferReadHandle, buffer, size);
+  return read;
+}
+
+ssize_t TimeshiftBuffer::ReadDataFromFile(unsigned char *buffer,
+    unsigned int size)
+{
+  if (m_readPos != m_fileReadPos
+      && XBMC->SeekFile(m_filebufferReadHandle, m_readPos, SEEK_SET) != m_readPos)
+    return -1;
+  ssize_t read = XBMC->ReadFile(m_filebufferReadHandle, buffer, size);
+  m_fileReadPos += read;
+  return read;
 }
 
 time_t TimeshiftBuffer::TimeStart()

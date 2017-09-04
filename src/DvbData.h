@@ -29,13 +29,15 @@
 #define RS_VERSION_STR  STR(RS_VERSION_MAJOR) "." STR(RS_VERSION_MINOR) \
                           "." STR(RS_VERSION_PATCH1) "." STR(RS_VERSION_PATCH2)
 
+namespace DVBViewer
+{
 /* forward declaration */
-class DvbGroup;
+class ChannelGroup;
 
-class DvbChannel
+class Channel
 {
 public:
-  DvbChannel()
+  Channel()
     : epgId(0)
   {}
 
@@ -61,27 +63,27 @@ public:
   bool encrypted;
 };
 
-class DvbGroup
+class ChannelGroup
 {
 public:
   std::string name;
   /*!< @brief name of the channel on the backend */
   std::string backendName;
-  std::list<DvbChannel *> channels;
+  std::list<Channel *> channels;
   bool radio;
   bool hidden;
 };
 
-class DvbEPGEntry
+class EPGEntry
 {
 public:
-  DvbEPGEntry()
+  EPGEntry()
     : genre(0)
   {}
 
 public:
   unsigned int id;
-  DvbChannel *channel;
+  Channel *channel;
   std::string title;
   time_t start;
   time_t end;
@@ -90,7 +92,7 @@ public:
   std::string plot;
 };
 
-class DvbTimer
+class Timer
 {
 public:
   enum class State
@@ -102,7 +104,7 @@ public:
     UPDATED
   };
 
-  DvbTimer()
+  Timer()
     : updateState(State::NEW)
   {}
 
@@ -113,7 +115,7 @@ public:
     updated = true; \
    }
 
-  bool updateFrom(const DvbTimer &source)
+  bool updateFrom(const Timer &source)
   {
     bool updated = false;
     TIMER_UPDATE_MEMBER(channel);
@@ -136,7 +138,7 @@ public:
   /*!< @brief timer id on backend. unique at a time */
   unsigned int backendId;
 
-  DvbChannel *channel;
+  Channel *channel;
   std::string title;
   uint64_t channelId;
   time_t start;
@@ -147,23 +149,10 @@ public:
   State updateState;
 };
 
-class DvbRecording
+class Recording
 {
 public:
-  enum class Grouping
-    : int // same type as addon settings
-  {
-    DISABLED = 0,
-    BY_DIRECTORY,
-    BY_DATE,
-    BY_FIRST_LETTER,
-    BY_TV_CHANNEL,
-    BY_SERIES,
-    BY_TITLE
-  };
-
-public:
-  DvbRecording()
+  Recording()
     : genre(0)
   {}
 
@@ -179,21 +168,19 @@ public:
   /*!< @brief channel name provided by the backend */
   std::string channelName;
   /*!< @brief channel in case our search was successful */
-  DvbChannel *channel;
+  Channel *channel;
   /*!< @brief group name and its size/amount of recordings */
   std::map<std::string, unsigned int>::iterator group;
 };
 
-typedef std::vector<DvbChannel *> DvbChannels_t;
-typedef std::vector<DvbGroup> DvbGroups_t;
-typedef std::vector<DvbTimer> DvbTimers_t;
+typedef std::vector<Timer> TimerList;
 
-class Dvb
+class Client
   : public P8PLATFORM::CThread
 {
 public:
-  Dvb(void);
-  ~Dvb();
+  Client(void);
+  ~Client();
 
   bool IsConnected();
 
@@ -235,10 +222,10 @@ private:
   httpResponse GetHttpXML(const std::string& url);
   std::string URLEncode(const std::string& data);
   bool LoadChannels();
-  DvbTimers_t LoadTimers();
+  TimerList LoadTimers();
   void TimerUpdates();
-  DvbChannel *GetChannel(std::function<bool (const DvbChannel*)> func);
-  DvbTimer *GetTimer(std::function<bool (const DvbTimer&)> func);
+  Channel *GetChannel(std::function<bool (const Channel*)> func);
+  Timer *GetTimer(std::function<bool (const Timer&)> func);
 
   // helper functions
   void RemoveNullChars(std::string& str);
@@ -262,13 +249,13 @@ private:
   std::vector<std::string> m_recfolders;
 
   /* channels */
-  DvbChannels_t m_channels;
+  std::vector<Channel *> m_channels;
   /* active (not hidden) channels */
   unsigned int m_channelAmount;
   unsigned int m_currentChannel;
 
   /* channel groups */
-  DvbGroups_t m_groups;
+  std::vector<ChannelGroup> m_groups;
   /* active (not hidden) groups */
   unsigned int m_groupAmount;
 
@@ -276,10 +263,11 @@ private:
   bool m_updateEPG;
   unsigned int m_recordingAmount;
 
-  DvbTimers_t m_timers;
+  TimerList m_timers;
   unsigned int m_nextTimerId;
 
   P8PLATFORM::CMutex m_mutex;
 };
 
+}
 #endif
